@@ -98,7 +98,7 @@ class Visualization2D:
         valid_pts_depth = pts_depth[mask]
         print("Valid radar points after filtering: ", valid_pts_img.shape[0])
         ax.scatter(valid_pts_img[:, 0], valid_pts_img[:, 1], 
-                   c=valid_pts_depth, cmap='jet', s=30, alpha=0.9, zorder=10)
+                   c=valid_pts_depth, cmap='jet', s=3, alpha=0.9, zorder=10)
 
     def draw_plot(self, img: np.ndarray, 
                   points: np.ndarray, 
