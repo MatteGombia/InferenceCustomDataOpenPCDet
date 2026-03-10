@@ -13,7 +13,17 @@ class PointProcessor:
 
         self.n_frames = n_frames
         self.points_per_frame = []
+        self.timestamp_last_frame = 0
+        self.dt = 0
         self.multiframe_points = np.empty((0, 7), dtype=np.float32)  # [x, y, z, intensity, time, frame_id, velocity]
+
+    def add_timestamp(self, timestamp):
+        if self.timestamp_last_frame != 0:
+            self.dt = (timestamp - self.timestamp_last_frame) * 1e-9  # Convert nanoseconds to seconds
+
+        print(f"New frame timestamp: {timestamp}, dt from last frame: {self.dt:.3f} seconds")
+        
+        self.timestamp_last_frame = timestamp
 
     def calculate_compensated_velocity(self, points):
         """
@@ -101,11 +111,11 @@ class PointProcessor:
     
     def transposeFrame(self, points):
         # Apply the shift and rotation to the points
-        cos_yaw = np.cos(self.shift_yaw)
-        sin_yaw = np.sin(self.shift_yaw)
+        cos_yaw = np.cos(self.shift_yaw * self.dt)
+        sin_yaw = np.sin(self.shift_yaw * self.dt)
 
-        x_shifted = points[:, 0] - self.shift_x
-        y_shifted = points[:, 1] - self.shift_y
+        x_shifted = points[:, 0] - self.shift_x * self.dt
+        y_shifted = points[:, 1] - self.shift_y * self.dt
 
         x_rotated = x_shifted * cos_yaw + y_shifted * sin_yaw
         y_rotated = -x_shifted * sin_yaw + y_shifted * cos_yaw

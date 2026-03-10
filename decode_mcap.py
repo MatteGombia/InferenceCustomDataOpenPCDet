@@ -22,8 +22,8 @@ import cv2
 # [ 0.0,   f_y,  c_y ]
 # [ 0.0,   0.0,  1.0 ]
 
-LOG = "4PORTE"
-# LOG = "MARZAGLIA"
+#LOG = "4PORTE"
+LOG = "MARZAGLIA"
 
 #DATASET = "NUSCENES"  
 DATASET = "VOD"  
@@ -138,7 +138,7 @@ class DataProcessor:
 
     
     def decodeImage(self, channel, proto_msg):
-        print("image: ", proto_msg.width, "x", proto_msg.height, "type: ", proto_msg.type) 
+        #print("image: ", proto_msg.width, "x", proto_msg.height, "type: ", proto_msg.type) 
         # JPEG
         if(proto_msg.type == 10):
             # Convert the bytes into a NumPy uint8 array
@@ -177,6 +177,8 @@ class DataProcessor:
     def decodeCloud(self, data):
         self.points = protoCloudToNumpy(data)
         print("Pointcloud: ", np.shape(self.points))
+       
+        self.points_processor.add_timestamp(data.head.stamp)
 
         # debug viz
         # import open3d as o3d
@@ -292,8 +294,9 @@ if __name__ == "__main__":
             elif(schema.name == "proto.tk.msg.Cloud"):
                 if processor.points_processor.img is not None and channel.topic == "/radar/cloud/radar_fc" and i > 400:
                     #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
-                    # processor.decodeCloud(proto_msg)
-                    # processor.processCloud()
+                    #print(f"msg {proto_msg}]")
+                    processor.decodeCloud(proto_msg)
+                    processor.processCloud()
                     counter_cloud += 1
                     if counter_cloud % 50 == 0:
                         print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
@@ -312,6 +315,6 @@ if __name__ == "__main__":
             # elif(schema.name == "proto.tk.msg.Odometry"):
             #     processor.decodeOdometry(proto_msg)
             elif (channel.topic == "/odom/debug"):
+                #print(f"msg {proto_msg}]")
                 processor.decodeOdometry(proto_msg)
-                print(f"msg {proto_msg}]")
                 counter_odom += 1

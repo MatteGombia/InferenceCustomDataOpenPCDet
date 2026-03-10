@@ -15,7 +15,18 @@ class PointProcessorNuscenes:
 
         self.n_frames = n_frames
         self.points_per_frame = []
-        self.multiframe_points = np.empty((0, 7), dtype=np.float32)  # [x, y, z, intensity, time, frame_id, velocity]
+        self.timestamp_last_frame = 0
+        self.dt = 0
+        self.multiframe_points = np.empty((0, 7), dtype=np.float32) 
+
+    def add_timestamp(self, timestamp):
+        if self.timestamp_last_frame != 0:
+            self.dt = (timestamp - self.timestamp_last_frame) * 1e-9  # Convert nanoseconds to seconds
+
+        print(f"New frame timestamp: {timestamp}, dt from last frame: {self.dt:.3f} seconds")
+        
+        self.timestamp_last_frame = timestamp
+
 
     def calculate_compensated_velocity(self, points):
         """
@@ -104,7 +115,7 @@ class PointProcessorNuscenes:
         self.points_per_frame.append(len(processed_points))
 
         self.multiframe_points = self.transposeFrame(self.multiframe_points)
-        self.multiframe_points[:, 6] -= 1  # Decrease time for all points by 1
+        self.multiframe_points[:, 6] -= self.dt  # Decrease time for all points by the difference in timestamp
         self.multiframe_points = np.vstack([self.multiframe_points, processed_points])
 
 
@@ -121,11 +132,11 @@ class PointProcessorNuscenes:
     
     def transposeFrame(self, points):
         # Apply the shift and rotation to the points
-        cos_yaw = np.cos(self.shift_yaw)
-        sin_yaw = np.sin(self.shift_yaw)
+        cos_yaw = np.cos(self.shift_yaw * self.dt)
+        sin_yaw = np.sin(self.shift_yaw * self.dt)
 
-        x_shifted = points[:, 0] - self.shift_x
-        y_shifted = points[:, 1] - self.shift_y
+        x_shifted = points[:, 0] - self.shift_x * self.dt
+        y_shifted = points[:, 1] - self.shift_y * self.dt
 
         x_rotated = x_shifted * cos_yaw + y_shifted * sin_yaw
         y_rotated = -x_shifted * sin_yaw + y_shifted * cos_yaw
