@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+from point_processor_nuscenes import PointProcessorNuscenes
 from point_processor import PointProcessor
 from mcap_protobuf.decoder import DecoderFactory
 from mcap.reader import make_reader
@@ -21,33 +22,40 @@ import cv2
 # [ 0.0,   f_y,  c_y ]
 # [ 0.0,   0.0,  1.0 ]
 
+LOG = "4PORTE"
+# LOG = "MARZAGLIA"
 
+#DATASET = "NUSCENES"  
+DATASET = "VOD"  
 
 
 
 
 # # Marzaglia
-# radar_frame_id = "radar_fc"
-# camera_frame_id = "camera_fcl"
-# YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte_marzaglia.yaml"
-# # For Marzaglia, the camera intrinsics are actually not precise
-# my_camera_intrinsics = [
-#     [1200.0,    0.0,  960.0],
-#     [   0.0, 1200.0,  540.0],
-#     [   0.0,    0.0,    1.0]
-# ]
+if LOG == "MARZAGLIA":
+    radar_frame_id = "radar_fc"
+    camera_frame_id = "camera_fcl"
+    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte_marzaglia.yaml"
+    # For Marzaglia, the camera intrinsics are actually not precise
+    my_camera_intrinsics = [
+        [1200.0,    0.0,  960.0],
+        [   0.0, 1200.0,  540.0],
+        [   0.0,    0.0,    1.0]
+    ]
+    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/marzaglia_with_odom.mcap"
 
-# 4porte
-radar_frame_id = "radar_fc"
-camera_frame_id = "cam_f"
-# For 4porte, the camera intrinsics are actually not precise
-my_camera_intrinsics = [
-    [800.0,   0.0, 400.0],
-    [  0.0, 800.0, 300.0],
-    [  0.0,   0.0,   1.0]
-]
-YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
-
+# # 4porte
+if LOG == "4PORTE":
+    radar_frame_id = "radar_fc"
+    camera_frame_id = "cam_f"
+    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
+    # For 4porte, the camera intrinsics are actually not precise
+    my_camera_intrinsics = [
+        [800.0,   0.0, 400.0],
+        [0.0, 800.0, 300.0],
+        [0.0,   0.0,   1.0]
+    ]
+    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/quattroporte_hipert_with_odom.mcap"
 
 RADAR_OFFSET_TX = 3.5  # meters forward from the vehicle's center
 RADAR_OFFSET_TY = -0.5  # meters to the left of the vehicle
@@ -57,8 +65,16 @@ OUTPUT_DIR_IMGS_2D = "./results/2D/images"
 IMG_PATH_BEV = "/media/franco/hdd/matteogombia/OpenPCDet/tools/results/BEV/images"
 
 # YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
-CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
-CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
+
+if DATASET == "VOD":
+    CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
+    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
+
+# NuScenes
+if DATASET == "NUSCENES":
+    CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/nuscenes_models/PP_nuscenes_radar.yaml"
+    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_28.pth" 
+
 
 class CustomDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
@@ -76,12 +92,20 @@ class DataProcessor:
         self.cloud = None
         self.counter = 0
 
-        self.points_processor = PointProcessor(
-            radar_offset_tx=RADAR_OFFSET_TX,
-            radar_offset_ty=RADAR_OFFSET_TY,
-            radar_offset_yaw=RADAR_OFFSET_YAW,
-            n_frames=5
-        )
+        if DATASET == "VOD":
+            self.points_processor = PointProcessor(
+                radar_offset_tx=RADAR_OFFSET_TX,
+                radar_offset_ty=RADAR_OFFSET_TY,
+                radar_offset_yaw=RADAR_OFFSET_YAW,
+                n_frames=5
+            )
+        if DATASET == "NUSCENES":
+            self.points_processor = PointProcessorNuscenes(
+                radar_offset_tx=RADAR_OFFSET_TX,
+                radar_offset_ty=RADAR_OFFSET_TY,
+                radar_offset_yaw=RADAR_OFFSET_YAW,
+                n_frames=6
+            )
 
         calib = CustomYAMLCalibration(
             yaml_path=YAML_PATH, 
@@ -147,11 +171,7 @@ class DataProcessor:
     def decodeOdometry(self, proto_msg):
         self.points_processor.shift_x = proto_msg.twist.linear.x
         self.points_processor.shift_y = proto_msg.twist.linear.y
-
-        # self.points_processor.shift_x = np.sqrt(proto_msg.twist.linear.x**2 + proto_msg.twist.linear.y**2) 
-        # self.points_processor.shift_y = 0
          
-
         self.points_processor.shift_yaw = proto_msg.twist.angular.z
 
     def decodeCloud(self, data):
@@ -165,7 +185,6 @@ class DataProcessor:
         # o3d.visualization.draw_geometries([pcd])
 
     def processCloud(self):
-
         points_multiframe = self.points_processor.processPoints(self.points)
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
@@ -201,8 +220,16 @@ class DataProcessor:
         
         color_dict = {}
         for i, v in enumerate(cfg.CLASS_NAMES):
+            if v == 'bicycle':
+                v = 'Cyclist' 
+            if v == 'pedestrian':
+                v = 'Pedestrian'
+            if v == 'car':
+                v = 'Car'
             # Applied the .get() fallback to prevent KeyErrors for missing classes
             color_dict[v] = label_color_palette_2d.get(v, (128, 128, 128))
+
+        print(color_dict)
         saveODImgs(anno=predictions, pts=points_multiframe, img_path=IMG_PATH_BEV, color_dict=color_dict, title='pred', fid=self.counter)
         self.counter += 1
         # -------------------------------------------
@@ -244,25 +271,36 @@ class DataProcessor:
             save_figure=True, 
             show_pred=True, 
             show_radar=True, 
-            score_threshold=0.3
+            score_threshold=0.4
         )
 
 
 
 if __name__ == "__main__":
     processor = DataProcessor()
-    with open(sys.argv[1], "rb") as f:
+    i = 0
+    counter_odom = 0
+    counter_cloud = 0
+    with open(MCAP_PATH, "rb") as f:
         reader = make_reader(f, decoder_factories=[DecoderFactory()])
         for schema, channel, message, proto_msg in reader.iter_decoded_messages():
             #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
             if(schema.name == "proto.tk.msg.Image"):
                 #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                 processor.decodeImage(channel, proto_msg)
+
             elif(schema.name == "proto.tk.msg.Cloud"):
-                if processor.points_processor.img is not None and channel.topic == "/radar/cloud/radar_fc":
-                    print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
-                    processor.decodeCloud(proto_msg)
-                    processor.processCloud()
+                if processor.points_processor.img is not None and channel.topic == "/radar/cloud/radar_fc" and i > 400:
+                    #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
+                    # processor.decodeCloud(proto_msg)
+                    # processor.processCloud()
+                    counter_cloud += 1
+                    if counter_cloud % 50 == 0:
+                        print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
+                else: 
+                    i += 1
+                    counter_cloud += 1
+
                 
                 #print(f"msg {proto_msg.type}]")
 
@@ -275,4 +313,5 @@ if __name__ == "__main__":
             #     processor.decodeOdometry(proto_msg)
             elif (channel.topic == "/odom/debug"):
                 processor.decodeOdometry(proto_msg)
-                # print(f"msg {proto_msg}]")
+                print(f"msg {proto_msg}]")
+                counter_odom += 1
