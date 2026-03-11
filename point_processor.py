@@ -1,14 +1,16 @@
 import numpy as np
 
+use_SNR = False
+
 class PointProcessor:
     def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):
         self.radar_offset_tx = radar_offset_tx
         self.radar_offset_ty = radar_offset_ty
         self.radar_offset_yaw = radar_offset_yaw
 
-        self.shift_x = 0.0
-        self.shift_y = 0.0
-        self.shift_yaw = 0.0
+        self.vel_x = 0.0
+        self.vel_y = 0.0
+        self.vel_yaw = 0.0
         self.img = None
 
         self.n_frames = n_frames
@@ -21,11 +23,58 @@ class PointProcessor:
         if self.timestamp_last_frame != 0:
             self.dt = (timestamp - self.timestamp_last_frame) * 1e-9  # Convert nanoseconds to seconds
 
-        print(f"New frame timestamp: {timestamp}, dt from last frame: {self.dt:.3f} seconds")
+        #print(f"New frame timestamp: {timestamp}, dt from last frame: {self.dt:.3f} seconds")
         
         self.timestamp_last_frame = timestamp
 
-    def calculate_compensated_velocity(self, points):
+    def add_auxiliar_cloud(self, points, shift_x = 0.0, shift_y = 0.0, yaw = 0.0):
+        print("**** DEBUG *********")
+        print(f"Point 0 : {points[0]}, shift x, y, yaw {shift_x, shift_y, yaw}")
+        yaw_in_radians = np.deg2rad(yaw)
+        print(f"Yaw in radians {yaw_in_radians}")
+
+        processed_points = self.processPointsSingleFrame(points, shift_x+self.radar_offset_tx, shift_y+self.radar_offset_ty, yaw_in_radians+self.radar_offset_yaw)
+        print(f"Point 0 after processing: {processed_points[0]}")
+
+        rotated_points = self.rotate_points(processed_points, shift_x, shift_y, yaw_in_radians)
+        print(f"Point 0 after rotation: {rotated_points[0]}")
+
+        #[x, y, z, snr, v_comp_x, v_comp_y, time]
+        processed_points = self.add_random_z(processed_points)
+        #processed_points = self.snr_to_fake_rcs(processed_points)
+        if use_SNR:
+            rotated_points = self.convert_snr_to_rcs(rotated_points, C_ars430=68.0) # Example constant, should be calibrated
+        else:
+            rotated_points = self.convert_intensity_to_rcs(rotated_points)
+
+        n_points_before = self.multiframe_points.shape[0]
+        self.points_per_frame[-1] += rotated_points.shape[0]
+
+        self.multiframe_points = np.vstack([self.multiframe_points, rotated_points])
+
+        #print(f"Added {rotated_points.shape[0]} points from auxiliary cloud. Total points before: {n_points_before}, after: {self.multiframe_points.shape[0]}")
+
+        #print(f"Tot points in vector: {sum(self.points_per_frame)}")
+        #print(f"Current multiframe points shape: {self.multiframe_points.shape}")
+
+        return 
+
+    def rotate_points(self, points, shift_x, shift_y, yaw):
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+
+        # 1. Rotate FIRST 
+        x_rotated = points[:, 0] * cos_yaw - points[:, 1] * sin_yaw
+        y_rotated = points[:, 0] * sin_yaw + points[:, 1] * cos_yaw
+
+        # 2. Add translation SECOND
+        points[:, 0] = x_rotated + shift_x
+        points[:, 1] = y_rotated + shift_y
+
+        return points
+
+
+    def calculate_compensated_velocity(self, points, shift_x, shift_y, shift_yaw):
         """
         Calculates the absolute compensated radial velocity for radar points.
         
@@ -42,8 +91,8 @@ class PointProcessor:
         v_meas = points[:, 6] # The raw Doppler velocity from the radar
         
 
-        v_x, v_y, omega_z = self.shift_x, self.shift_y, self.shift_yaw
-        t_x, t_y, yaw = self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw  
+        v_x, v_y, omega_z = self.vel_x, self.vel_y, self.vel_yaw
+        t_x, t_y, yaw = shift_x, shift_y, shift_yaw  
         
         # radar sensor's physical velocity
         v_sens_x = v_x - (omega_z * t_y)
@@ -70,17 +119,17 @@ class PointProcessor:
         # Compensate the raw measurement
         v_comp = v_meas + v_ego_los
 
-        print("EGO VELOCITY (X, Y, YAW): ", v_x, v_y, omega_z)
-        print("MEAN RADIAL VELOCITY BEFORE COMPENSATION: ", np.mean(v_meas))
-        print("MEAN EGO LOS VELOCITY: ", np.mean(v_ego_los))
-        print("MEAN RADIAL VELOCITY AFTER COMPENSATION: ", np.mean(v_comp))
+        # print("EGO VELOCITY (X, Y, YAW): ", v_x, v_y, omega_z)
+        # print("MEAN RADIAL VELOCITY BEFORE COMPENSATION: ", np.mean(v_meas))
+        # print("MEAN EGO LOS VELOCITY: ", np.mean(v_ego_los))
+        # print("MEAN RADIAL VELOCITY AFTER COMPENSATION: ", np.mean(v_comp))
         
         return v_comp
     
     def processPoints(self, points):
-        processed_points = self.processPointsSingleFrame(points)
+        processed_points = self.processPointsSingleFrame(points, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
 
-        #processed_points = self.add_random_z(processed_points)
+        processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
 
         processed_points = self.convert_intensity_to_rcs(processed_points)
@@ -98,8 +147,8 @@ class PointProcessor:
         self.multiframe_points = np.vstack([self.multiframe_points, processed_points])
 
 
-        print(f"Tot points in vector: {sum(self.points_per_frame)}")
-        print(f"Current multiframe points shape: {self.multiframe_points.shape}")
+        # print(f"Tot points in vector: {sum(self.points_per_frame)}")
+        # print(f"Current multiframe points shape: {self.multiframe_points.shape}")
         # if len(self.points_per_frame) == 5:
         #     print(f"Sample of points frame 5: {self.multiframe_points[0:2, :]}")
         #     print(f"Sample of points frame 4: {self.multiframe_points[self.points_per_frame[0]:self.points_per_frame[0]+2, :]}")
@@ -111,11 +160,11 @@ class PointProcessor:
     
     def transposeFrame(self, points):
         # Apply the shift and rotation to the points
-        cos_yaw = np.cos(self.shift_yaw * self.dt)
-        sin_yaw = np.sin(self.shift_yaw * self.dt)
+        cos_yaw = np.cos(self.vel_yaw * self.dt)
+        sin_yaw = np.sin(self.vel_yaw * self.dt)
 
-        x_shifted = points[:, 0] - self.shift_x * self.dt
-        y_shifted = points[:, 1] - self.shift_y * self.dt
+        x_shifted = points[:, 0] - self.vel_x * self.dt
+        y_shifted = points[:, 1] - self.vel_y * self.dt
 
         x_rotated = x_shifted * cos_yaw + y_shifted * sin_yaw
         y_rotated = -x_shifted * sin_yaw + y_shifted * cos_yaw
@@ -125,8 +174,8 @@ class PointProcessor:
 
         return points
     
-    def processPointsSingleFrame(self, points):
-        v_comp = self.calculate_compensated_velocity(points)
+    def processPointsSingleFrame(self, points, shift_x=0.0, shift_y=0.0, shift_yaw=0.0):
+        v_comp = self.calculate_compensated_velocity(points, shift_x, shift_y, shift_yaw)
 
         radial_ambiguous_velocity = np.expand_dims(points[:,6], axis=1)
         #print("Speed: ", np.shape(radial_ambiguous_velocity))
@@ -137,7 +186,7 @@ class PointProcessor:
         time_vector = np.zeros((points.shape[0], 1), dtype=points.dtype)
         processed_points = np.hstack([points[:, 0:3], snr, radial_ambiguous_velocity, v_comp, time_vector])
         
-        print("Points with batch: ", np.shape(processed_points))
+        # print("Points with batch: ", np.shape(processed_points))
 
         return processed_points
 
@@ -190,7 +239,7 @@ class PointProcessor:
 
         points[:, 3] = rcs
 
-        print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
-        print("Sample RCS values: ", rcs[:10])
+        # print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
+        # print("Sample RCS values: ", rcs[:10])
 
         return points

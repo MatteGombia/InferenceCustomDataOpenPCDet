@@ -22,8 +22,8 @@ import cv2
 # [ 0.0,   f_y,  c_y ]
 # [ 0.0,   0.0,  1.0 ]
 
-#LOG = "4PORTE"
-LOG = "MARZAGLIA"
+LOG = "4PORTE"
+#LOG = "MARZAGLIA"
 
 #DATASET = "NUSCENES"  
 DATASET = "VOD"  
@@ -43,6 +43,9 @@ if LOG == "MARZAGLIA":
         [   0.0,    0.0,    1.0]
     ]
     MCAP_PATH = "/media/franco/hdd/dataset/radar_data/marzaglia_with_odom.mcap"
+    RADAR_OFFSET_TX = 4.0  # meters forward from the vehicle's center
+    RADAR_OFFSET_TY = 0.0  # meters to the left of the vehicle
+    RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
 
 # # 4porte
 if LOG == "4PORTE":
@@ -56,10 +59,11 @@ if LOG == "4PORTE":
         [0.0,   0.0,   1.0]
     ]
     MCAP_PATH = "/media/franco/hdd/dataset/radar_data/quattroporte_hipert_with_odom.mcap"
+    RADAR_OFFSET_TX = 3.5  # meters forward from the vehicle's center
+    RADAR_OFFSET_TY = -0.5  # meters to the left of the vehicle
+    RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
 
-RADAR_OFFSET_TX = 3.5  # meters forward from the vehicle's center
-RADAR_OFFSET_TY = -0.5  # meters to the left of the vehicle
-RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
+
 
 OUTPUT_DIR_IMGS_2D = "./results/2D/images"
 IMG_PATH_BEV = "/media/franco/hdd/matteogombia/OpenPCDet/tools/results/BEV/images"
@@ -73,7 +77,7 @@ if DATASET == "VOD":
 # NuScenes
 if DATASET == "NUSCENES":
     CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/nuscenes_models/PP_nuscenes_radar.yaml"
-    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_28.pth" 
+    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_40.pth" 
 
 
 class CustomDataset(DatasetTemplate):
@@ -91,6 +95,8 @@ class DataProcessor:
     def __init__(self):
         self.cloud = None
         self.counter = 0
+        self.left_points = None
+        self.right_points = None
 
         if DATASET == "VOD":
             self.points_processor = PointProcessor(
@@ -169,25 +175,34 @@ class DataProcessor:
             raise TypeError("Unsupported image type: ", proto_msg.type)
         
     def decodeOdometry(self, proto_msg):
-        self.points_processor.shift_x = proto_msg.twist.linear.x
-        self.points_processor.shift_y = proto_msg.twist.linear.y
+        self.points_processor.vel_x = proto_msg.twist.linear.x
+        self.points_processor.vel_y = proto_msg.twist.linear.y
          
-        self.points_processor.shift_yaw = proto_msg.twist.angular.z
+        self.points_processor.vel_yaw = proto_msg.twist.angular.z
 
     def decodeCloud(self, data):
-        self.points = protoCloudToNumpy(data)
-        print("Pointcloud: ", np.shape(self.points))
+        if data.head.frameId == radar_frame_id:
+            self.points = protoCloudToNumpy(data)
+            print("Pointcloud: ", np.shape(self.points))
        
-        self.points_processor.add_timestamp(data.head.stamp)
+            self.points_processor.add_timestamp(data.head.stamp)
 
-        # debug viz
-        # import open3d as o3d
-        # pcd = o3d.geometry.PointCloud()
-        # pcd.points = o3d.utility.Vector3dVector(points[:, :3])
-        # o3d.visualization.draw_geometries([pcd])
+        elif data.head.frameId == "radar_fl":
+            self.left_points = protoCloudToNumpy(data)
+
+        elif data.head.frameId == "radar_fr":
+            self.right_points = protoCloudToNumpy(data)
+
 
     def processCloud(self):
         points_multiframe = self.points_processor.processPoints(self.points)
+        
+        if self.left_points is not None:
+            self.points_processor.add_auxiliar_cloud(self.left_points, 0.0, 0.5, 32.5)
+        if self.right_points is not None:
+            self.points_processor.add_auxiliar_cloud(self.right_points, 0.0, -0.5, -32.0)
+
+        points_multiframe = self.points_processor.multiframe_points
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
         
@@ -273,7 +288,7 @@ class DataProcessor:
             save_figure=True, 
             show_pred=True, 
             show_radar=True, 
-            score_threshold=0.4
+            score_threshold=0.5
         )
 
 
@@ -292,17 +307,25 @@ if __name__ == "__main__":
                 processor.decodeImage(channel, proto_msg)
 
             elif(schema.name == "proto.tk.msg.Cloud"):
-                if processor.points_processor.img is not None and channel.topic == "/radar/cloud/radar_fc" and i > 400:
-                    #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
-                    #print(f"msg {proto_msg}]")
-                    processor.decodeCloud(proto_msg)
-                    processor.processCloud()
-                    counter_cloud += 1
-                    if counter_cloud % 50 == 0:
-                        print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
-                else: 
-                    i += 1
-                    counter_cloud += 1
+                #print(f"msg {proto_msg}]")
+                if processor.points_processor.img is not None:
+                    if channel.topic == "/radar/cloud/radar_fc" and i > 400:
+                        #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
+                        #print(f"msg {proto_msg}]")
+                        processor.decodeCloud(proto_msg)
+                        processor.processCloud()
+                        counter_cloud += 1
+                        if counter_cloud % 50 == 0:
+                            print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
+                    elif channel.topic == "/radar/cloud/radar_fr" and i > 400:
+                        #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
+                        processor.decodeCloud(proto_msg)
+                    elif channel.topic == "/radar/cloud/radar_fl" and i > 400:
+                        #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
+                        processor.decodeCloud(proto_msg)
+                    else: 
+                        i += 1
+                        counter_cloud += 1
 
                 
                 #print(f"msg {proto_msg.type}]")
