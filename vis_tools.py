@@ -22,7 +22,8 @@ def drawBEV(ax, pts, annos, color_dict, ax_title, ext_legends=[]):
     if pts is not None:
         x = pts[:, 0]
         y = pts[:, 1]
-        ax.scatter(x, y, c='black', s=0.1)
+        #ax.scatter(x, y, c='black', s=0.1)
+        ax.scatter(x, y, c=pts[:, -1], s=0.1)
 
 
     # --- Confidence Scores ---
