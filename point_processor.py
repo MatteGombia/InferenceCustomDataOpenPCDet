@@ -1,6 +1,7 @@
 import numpy as np
 
 use_SNR = False
+ALIGN_RCS_DISTRIBUTION = True
 
 class PointProcessor:
     def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):
@@ -40,7 +41,7 @@ class PointProcessor:
         print(f"Point 0 after rotation: {rotated_points[0]}")
 
         #[x, y, z, snr, v_comp_x, v_comp_y, time]
-        processed_points = self.add_random_z(processed_points)
+        #processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
         if use_SNR:
             rotated_points = self.convert_snr_to_rcs(rotated_points, C_ars430=68.0) # Example constant, should be calibrated
@@ -129,7 +130,7 @@ class PointProcessor:
     def processPoints(self, points):
         processed_points = self.processPointsSingleFrame(points, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
 
-        processed_points = self.add_random_z(processed_points)
+        #processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
 
         processed_points = self.convert_intensity_to_rcs(processed_points)
@@ -237,9 +238,19 @@ class PointProcessor:
 
         rcs = rcs_norm * (MAX_RCS - MIN_RCS) + MIN_RCS
 
+        
+        rcs_mean = np.mean(rcs)
+        rcs_std = np.std(rcs)
+
+        if ALIGN_RCS_DISTRIBUTION:
+            
+            VOD_RCS_MEAN = -12.43  
+            VOD_RCS_STD = 13.27
+
+            rcs = ((rcs - rcs_mean) / rcs_std) * VOD_RCS_STD + VOD_RCS_MEAN
+
+            print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
+            # print("Sample RCS values: ", rcs[:10])
+
         points[:, 3] = rcs
-
-        # print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
-        # print("Sample RCS values: ", rcs[:10])
-
         return points

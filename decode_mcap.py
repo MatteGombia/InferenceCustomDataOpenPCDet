@@ -35,14 +35,14 @@ DATASET = "VOD"
 if LOG == "MARZAGLIA":
     radar_frame_id = "radar_fc"
     camera_frame_id = "camera_fcl"
-    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte_marzaglia.yaml"
+    YAML_PATH="/root/data/calib_4porte_marzaglia.yaml"
     # For Marzaglia, the camera intrinsics are actually not precise
     my_camera_intrinsics = [
         [1200.0,    0.0,  960.0],
         [   0.0, 1200.0,  540.0],
         [   0.0,    0.0,    1.0]
     ]
-    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/marzaglia_with_odom.mcap"
+    MCAP_PATH = "/root/data/marzaglia_with_odom.mcap"
     RADAR_OFFSET_TX = 4.0  # meters forward from the vehicle's center
     RADAR_OFFSET_TY = 0.0  # meters to the left of the vehicle
     RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
@@ -51,28 +51,28 @@ if LOG == "MARZAGLIA":
 if LOG == "4PORTE":
     radar_frame_id = "radar_fc"
     camera_frame_id = "cam_f"
-    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
+    YAML_PATH="/root/data/calib_4porte.yaml"
     # For 4porte, the camera intrinsics are actually not precise
     my_camera_intrinsics = [
         [800.0,   0.0, 400.0],
         [0.0, 800.0, 300.0],
         [0.0,   0.0,   1.0]
     ]
-    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/quattroporte_hipert_with_odom.mcap"
+    MCAP_PATH = "/root/data/quattroporte_hipert_with_odom.mcap"
     RADAR_OFFSET_TX = 3.5  # meters forward from the vehicle's center
     RADAR_OFFSET_TY = -0.5  # meters to the left of the vehicle
     RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
 
 
 
-OUTPUT_DIR_IMGS_2D = "./results/2D/images"
-IMG_PATH_BEV = "/media/franco/hdd/matteogombia/OpenPCDet/tools/results/BEV/images"
+OUTPUT_DIR_IMGS_2D = "/seeing_beyond/tools/results/2D/images"
+IMG_PATH_BEV = "/seeing_beyond/tools/results/BEV/images"
 
 # YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
 
 if DATASET == "VOD":
-    CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
-    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
+    CFG_FILE = "/seeing_beyond/tools/cfgs/kitti_models/cfar-radar.yaml"
+    CKPT_FILE = "/seeing_beyond/ckpts/cfar/cfar-radar.pth" 
 
 # NuScenes
 if DATASET == "NUSCENES":
@@ -103,7 +103,7 @@ class DataProcessor:
                 radar_offset_tx=RADAR_OFFSET_TX,
                 radar_offset_ty=RADAR_OFFSET_TY,
                 radar_offset_yaw=RADAR_OFFSET_YAW,
-                n_frames=5
+                n_frames=1
             )
         if DATASET == "NUSCENES":
             self.points_processor = PointProcessorNuscenes(
@@ -203,6 +203,8 @@ class DataProcessor:
             self.points_processor.add_auxiliar_cloud(self.right_points, 0.0, -0.5, -32.0)
 
         points_multiframe = self.points_processor.multiframe_points
+
+        points_multiframe = points_multiframe.astype(np.float32)
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
         
@@ -315,6 +317,7 @@ if __name__ == "__main__":
                         processor.decodeCloud(proto_msg)
                         processor.processCloud()
                         counter_cloud += 1
+                        print(f"******* FRAME {counter_cloud} *******")
                         if counter_cloud % 50 == 0:
                             print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
                     elif channel.topic == "/radar/cloud/radar_fr" and i > 400:
