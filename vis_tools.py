@@ -34,7 +34,7 @@ def drawBEV(ax, pts, annos, color_dict, ax_title, ext_legends=[]):
         score = pred_scores[i]
         rec = pred_boxes[i] if i < len(pred_boxes) else None
         # Only draw scores for predictions (Ground Truths usually lack scores or have dummy 0/-1 values)
-        if score > 0.01:
+        if score > 0.3:
             
             # Drawing boxes
             x = rec[0]

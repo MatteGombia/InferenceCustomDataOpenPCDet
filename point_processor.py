@@ -1,6 +1,8 @@
 import numpy as np
 
 use_SNR = False
+ALIGN_RCS_DISTRIBUTION = True
+
 
 class PointProcessor:
     def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):
@@ -12,6 +14,13 @@ class PointProcessor:
         self.vel_y = 0.0
         self.vel_yaw = 0.0
         self.img = None
+
+        self.bins = []
+        self.means = []
+        self.stds = []
+
+        self.timestamp_last_frame_left = 0
+        self.timestamp_last_frame_right = 0
 
         self.n_frames = n_frames
         self.points_per_frame = []
@@ -28,19 +37,19 @@ class PointProcessor:
         self.timestamp_last_frame = timestamp
 
     def add_auxiliar_cloud(self, points, shift_x = 0.0, shift_y = 0.0, yaw = 0.0):
-        print("**** DEBUG *********")
-        print(f"Point 0 : {points[0]}, shift x, y, yaw {shift_x, shift_y, yaw}")
+        # print("**** DEBUG *********")
+        # print(f"Point 0 : {points[0]}, shift x, y, yaw {shift_x, shift_y, yaw}")
         yaw_in_radians = np.deg2rad(yaw)
-        print(f"Yaw in radians {yaw_in_radians}")
+        # print(f"Yaw in radians {yaw_in_radians}")
 
         processed_points = self.processPointsSingleFrame(points, shift_x+self.radar_offset_tx, shift_y+self.radar_offset_ty, yaw_in_radians+self.radar_offset_yaw)
-        print(f"Point 0 after processing: {processed_points[0]}")
+        # print(f"Point 0 after processing: {processed_points[0]}")
 
         rotated_points = self.rotate_points(processed_points, shift_x, shift_y, yaw_in_radians)
-        print(f"Point 0 after rotation: {rotated_points[0]}")
+        # print(f"Point 0 after rotation: {rotated_points[0]}")
 
         #[x, y, z, snr, v_comp_x, v_comp_y, time]
-        processed_points = self.add_random_z(processed_points)
+        # processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
         if use_SNR:
             rotated_points = self.convert_snr_to_rcs(rotated_points, C_ars430=68.0) # Example constant, should be calibrated
@@ -129,7 +138,7 @@ class PointProcessor:
     def processPoints(self, points):
         processed_points = self.processPointsSingleFrame(points, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
 
-        processed_points = self.add_random_z(processed_points)
+        # processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
 
         processed_points = self.convert_intensity_to_rcs(processed_points)
@@ -237,9 +246,37 @@ class PointProcessor:
 
         rcs = rcs_norm * (MAX_RCS - MIN_RCS) + MIN_RCS
 
+        #Overall RCS mean across frames: -5.23, Overall RCS std across frames: 15.30
+        rcs_mean = -5.23
+        rcs_std = 15.30
+
+        # filtered_rcs = rcs[rcs != 0]  # Filter 
+        # self.bins.append(np.histogram(filtered_rcs, range=(-60, 40), bins=1000)[0])
+
+        # #debug
+        
+        # rcs_mean = np.mean(filtered_rcs)
+        # rcs_std = np.std(filtered_rcs)
+
+        # self.means.append(rcs_mean)
+        # self.stds.append(rcs_std)
+
+        if ALIGN_RCS_DISTRIBUTION:
+            
+            VOD_RCS_MEAN = -12.43  
+            VOD_RCS_STD = 13.27
+
+            rcs = ((rcs - rcs_mean) / rcs_std) * VOD_RCS_STD + VOD_RCS_MEAN
+
+            # print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
+            # print("Sample RCS values: ", rcs[:10])
+
         points[:, 3] = rcs
-
-        # print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
-        # print("Sample RCS values: ", rcs[:10])
-
         return points
+    
+    def print_bins(self):
+        if self.bins:
+            overall_histogram = np.sum(self.bins, axis=0)
+            print(f"Overall RCS histogram (sum of all frames): {overall_histogram}")
+        print(f"Overall RCS mean across frames: {np.mean(self.means):.2f}, Overall RCS std across frames: {np.mean(self.stds):.2f}")
+        print(f"Average std of RCS across frames: {np.mean(self.stds):.2f}")

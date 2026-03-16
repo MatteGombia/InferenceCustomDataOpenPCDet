@@ -28,7 +28,7 @@ LOG = "4PORTE"
 #DATASET = "NUSCENES"  
 DATASET = "VOD"  
 
-
+N_FRAMES = 5
 
 
 # # Marzaglia
@@ -71,14 +71,18 @@ IMG_PATH_BEV = "/media/franco/hdd/matteogombia/OpenPCDet/tools/results/BEV/image
 # YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
 
 if DATASET == "VOD":
-    CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
-    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
+    if N_FRAMES == 5:
+        CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
+        CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
+    else:
+        CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar_1frame.yaml"
+        CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar_1frame/default/ckpt/checkpoint_epoch_80.pth"
 
 # NuScenes
 if DATASET == "NUSCENES":
     CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/nuscenes_models/PP_nuscenes_radar.yaml"
-    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_40.pth" 
-
+    #CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_40.pth" 
+    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar_old/default/ckpt/checkpoint_epoch_40.pth"
 
 class CustomDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
@@ -103,7 +107,7 @@ class DataProcessor:
                 radar_offset_tx=RADAR_OFFSET_TX,
                 radar_offset_ty=RADAR_OFFSET_TY,
                 radar_offset_yaw=RADAR_OFFSET_YAW,
-                n_frames=5
+                n_frames=N_FRAMES
             )
         if DATASET == "NUSCENES":
             self.points_processor = PointProcessorNuscenes(
@@ -189,17 +193,21 @@ class DataProcessor:
 
         elif data.head.frameId == "radar_fl":
             self.left_points = protoCloudToNumpy(data)
+            self.points_processor.timestamp_last_frame_left = data.head.stamp
 
         elif data.head.frameId == "radar_fr":
             self.right_points = protoCloudToNumpy(data)
+            self.points_processor.timestamp_last_frame_right = data.head.stamp
 
 
     def processCloud(self):
         points_multiframe = self.points_processor.processPoints(self.points)
         
         if self.left_points is not None:
+            print("Adding left radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_left-self.points_processor.timestamp_last_frame)*1e-9)
             self.points_processor.add_auxiliar_cloud(self.left_points, 0.0, 0.5, 32.5)
         if self.right_points is not None:
+            print("Adding right radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_right-self.points_processor.timestamp_last_frame)*1e-9)
             self.points_processor.add_auxiliar_cloud(self.right_points, 0.0, -0.5, -32.0)
 
         points_multiframe = self.points_processor.multiframe_points
@@ -246,7 +254,7 @@ class DataProcessor:
             # Applied the .get() fallback to prevent KeyErrors for missing classes
             color_dict[v] = label_color_palette_2d.get(v, (128, 128, 128))
 
-        print(color_dict)
+        # print(color_dict)
         saveODImgs(anno=predictions, pts=points_multiframe, img_path=IMG_PATH_BEV, color_dict=color_dict, title='pred', fid=self.counter)
         self.counter += 1
         # -------------------------------------------
@@ -309,18 +317,21 @@ if __name__ == "__main__":
             elif(schema.name == "proto.tk.msg.Cloud"):
                 #print(f"msg {proto_msg}]")
                 if processor.points_processor.img is not None:
-                    if channel.topic == "/radar/cloud/radar_fc" and i > 400:
+                    if channel.topic == "/radar/cloud/radar_fc" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         #print(f"msg {proto_msg}]")
                         processor.decodeCloud(proto_msg)
                         processor.processCloud()
                         counter_cloud += 1
+                        # if counter_cloud % 2000 == 0:
+                        #     processor.points_processor.print_bins()
+                        #     sys.exit(0)
                         if counter_cloud % 50 == 0:
                             print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
-                    elif channel.topic == "/radar/cloud/radar_fr" and i > 400:
+                    elif channel.topic == "/radar/cloud/radar_fr" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
-                    elif channel.topic == "/radar/cloud/radar_fl" and i > 400:
+                    elif channel.topic == "/radar/cloud/radar_fl" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
                     else: 
