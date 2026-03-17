@@ -43,7 +43,7 @@ class PointProcessorNuscenes(BasePointProcessor):
         Returns:
             v_comp: (N,) numpy array of compensated velocities
         """
-        v_comp = self.super().calculate_compensated_velocity(points, shift_x, shift_y, shift_yaw, timestamp_pc)
+        v_comp = super().calculate_compensated_velocity(points, shift_x, shift_y, shift_yaw, timestamp_pc)
         v_comp_x = v_comp * self.u_x
         v_comp_y = v_comp * self.u_y
 
