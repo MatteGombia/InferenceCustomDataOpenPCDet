@@ -14,75 +14,10 @@ from visualization_2D_custom import Visualization2D
 from CustomCalib import CustomYAMLCalibration
 from vis_tools import saveODImgs
 from vod.visualization.settings import label_color_palette_2d
+from config import *
 
 import cv2
 
-# Format: 
-# [ f_x,   0.0,  c_x ]
-# [ 0.0,   f_y,  c_y ]
-# [ 0.0,   0.0,  1.0 ]
-
-LOG = "4PORTE"
-#LOG = "MARZAGLIA"
-
-#DATASET = "NUSCENES"  
-DATASET = "VOD"  
-
-N_FRAMES = 5
-
-
-# # Marzaglia
-if LOG == "MARZAGLIA":
-    radar_frame_id = "radar_fc"
-    camera_frame_id = "camera_fcl"
-    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte_marzaglia.yaml"
-    # For Marzaglia, the camera intrinsics are actually not precise
-    my_camera_intrinsics = [
-        [1200.0,    0.0,  960.0],
-        [   0.0, 1200.0,  540.0],
-        [   0.0,    0.0,    1.0]
-    ]
-    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/marzaglia_with_odom.mcap"
-    RADAR_OFFSET_TX = 4.0  # meters forward from the vehicle's center
-    RADAR_OFFSET_TY = 0.0  # meters to the left of the vehicle
-    RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
-
-# # 4porte
-if LOG == "4PORTE":
-    radar_frame_id = "radar_fc"
-    camera_frame_id = "cam_f"
-    YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
-    # For 4porte, the camera intrinsics are actually not precise
-    my_camera_intrinsics = [
-        [800.0,   0.0, 400.0],
-        [0.0, 800.0, 300.0],
-        [0.0,   0.0,   1.0]
-    ]
-    MCAP_PATH = "/media/franco/hdd/dataset/radar_data/quattroporte_hipert_with_odom.mcap"
-    RADAR_OFFSET_TX = 3.5  # meters forward from the vehicle's center
-    RADAR_OFFSET_TY = -0.5  # meters to the left of the vehicle
-    RADAR_OFFSET_YAW = 0.0  # radians, assuming radar faces forward with no rotation
-
-
-
-OUTPUT_DIR_IMGS_2D = "./results/2D/images"
-IMG_PATH_BEV = "/media/franco/hdd/matteogombia/OpenPCDet/tools/results/BEV/images"
-
-# YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
-
-if DATASET == "VOD":
-    if N_FRAMES == 5:
-        CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar.yaml"
-        CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar/default/ckpt/checkpoint_epoch_125.pth" 
-    else:
-        CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/kitti_models/PP_radar_1frame.yaml"
-        CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/kitti_models/PP_radar_1frame/default/ckpt/checkpoint_epoch_80.pth"
-
-# NuScenes
-if DATASET == "NUSCENES":
-    CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/nuscenes_models/PP_nuscenes_radar.yaml"
-    #CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_40.pth" 
-    CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar_old/default/ckpt/checkpoint_epoch_40.pth"
 
 class CustomDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
@@ -179,15 +114,13 @@ class DataProcessor:
             raise TypeError("Unsupported image type: ", proto_msg.type)
         
     def decodeOdometry(self, proto_msg):
-        self.points_processor.vel_x = proto_msg.twist.linear.x
-        self.points_processor.vel_y = proto_msg.twist.linear.y
-         
-        self.points_processor.vel_yaw = proto_msg.twist.angular.z
+        self.points_processor.add_odometry(proto_msg.twist.linear.x, proto_msg.twist.linear.y, proto_msg.twist.angular.z, proto_msg.head.stamp)
 
     def decodeCloud(self, data):
         if data.head.frameId == radar_frame_id:
             self.points = protoCloudToNumpy(data)
             print("Pointcloud: ", np.shape(self.points))
+            self.points_processor.new_pc_arrived = True
        
             self.points_processor.add_timestamp(data.head.stamp)
 
@@ -205,10 +138,10 @@ class DataProcessor:
         
         if self.left_points is not None:
             print("Adding left radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_left-self.points_processor.timestamp_last_frame)*1e-9)
-            self.points_processor.add_auxiliar_cloud(self.left_points, 0.0, 0.5, 32.5)
+            self.points_processor.add_auxiliar_cloud(self.left_points, self.points_processor.timestamp_last_frame_left, 0.0, 0.5, 32.5)
         if self.right_points is not None:
             print("Adding right radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_right-self.points_processor.timestamp_last_frame)*1e-9)
-            self.points_processor.add_auxiliar_cloud(self.right_points, 0.0, -0.5, -32.0)
+            self.points_processor.add_auxiliar_cloud(self.right_points, self.points_processor.timestamp_last_frame_right, 0.0, -0.5, -32.0)
 
         points_multiframe = self.points_processor.multiframe_points
         
@@ -288,7 +221,7 @@ class DataProcessor:
 
     def visualize(self, points, predictions):
         
-        # 4. Generate the image!
+        # Generate the image
         self.vis.draw_plot(
             img=self.points_processor.img,
             points=points,
@@ -321,7 +254,6 @@ if __name__ == "__main__":
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         #print(f"msg {proto_msg}]")
                         processor.decodeCloud(proto_msg)
-                        processor.processCloud()
                         counter_cloud += 1
                         # if counter_cloud % 2000 == 0:
                         #     processor.points_processor.print_bins()
@@ -352,3 +284,6 @@ if __name__ == "__main__":
                 #print(f"msg {proto_msg}]")
                 processor.decodeOdometry(proto_msg)
                 counter_odom += 1
+
+                if processor.points_processor.new_pc_arrived:
+                    processor.processCloud()
