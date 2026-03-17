@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 from point_processor_nuscenes import PointProcessorNuscenes
-from point_processor import PointProcessor
+from point_processor_VoD import PointProcessorVod
 from mcap_protobuf.decoder import DecoderFactory
 from mcap.reader import make_reader
 from cloud import protoCloudToNumpy
@@ -38,7 +38,7 @@ class DataProcessor:
         self.right_points = None
 
         if DATASET == "VOD":
-            self.points_processor = PointProcessor(
+            self.points_processor = PointProcessorVod(
                 radar_offset_tx=RADAR_OFFSET_TX,
                 radar_offset_ty=RADAR_OFFSET_TY,
                 radar_offset_yaw=RADAR_OFFSET_YAW,
