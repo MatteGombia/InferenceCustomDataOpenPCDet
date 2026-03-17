@@ -2,6 +2,7 @@ import numpy as np
 
 use_SNR = False
 ALIGN_RCS_DISTRIBUTION = True
+FILTER_FIXED_POINTS = True
 
 class PointProcessor:
     def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):
@@ -13,6 +14,21 @@ class PointProcessor:
         self.vel_y = 0.0
         self.vel_yaw = 0.0
         self.img = None
+
+        self.bins = []
+        self.means = []
+        self.stds = []
+        self.new_pc_arrived = False
+
+        self.timestamp_last_frame_left = 0
+        self.timestamp_last_frame_right = 0
+
+        self.timestamp_current_odom = 0
+        self.timestamp_last_odom = 0
+
+        self.previous_vel_x = 0.0
+        self.previous_vel_y = 0.0
+        self.previous_vel_yaw = 0.0
 
         self.n_frames = n_frames
         self.points_per_frame = []
@@ -28,20 +44,37 @@ class PointProcessor:
         
         self.timestamp_last_frame = timestamp
 
-    def add_auxiliar_cloud(self, points, shift_x = 0.0, shift_y = 0.0, yaw = 0.0):
-        print("**** DEBUG *********")
-        print(f"Point 0 : {points[0]}, shift x, y, yaw {shift_x, shift_y, yaw}")
+    def add_auxiliar_cloud(self, points, timestamp, shift_x = 0.0, shift_y = 0.0, yaw = 0.0):
+        # print("**** DEBUG *********")
+        # print(f"Point 0 : {points[0]}, shift x, y, yaw {shift_x, shift_y, yaw}")
         yaw_in_radians = np.deg2rad(yaw)
-        print(f"Yaw in radians {yaw_in_radians}")
+        # print(f"Yaw in radians {yaw_in_radians}")
 
-        processed_points = self.processPointsSingleFrame(points, shift_x+self.radar_offset_tx, shift_y+self.radar_offset_ty, yaw_in_radians+self.radar_offset_yaw)
-        print(f"Point 0 after processing: {processed_points[0]}")
+        processed_points = self.processPointsSingleFrame(points, timestamp, shift_x+self.radar_offset_tx, shift_y+self.radar_offset_ty, yaw_in_radians+self.radar_offset_yaw)
+        # print(f"Point 0 after processing: {processed_points[0]}")
+
+        #Adding time factor that shift the points of the auxiliary cloud compared to the main cloud
+        dt_aux = (timestamp - self.timestamp_last_frame) * 1e-9  # Convert nanoseconds to seconds
+        current_v_x, current_v_y, current_v_yaw = self.calculate_interpolated_velocity(timestamp)
+        additional_shift_x = current_v_x * dt_aux
+        additional_shift_y = current_v_y * dt_aux
+        additional_shift_yaw = current_v_yaw * dt_aux
+
+        print(f"Auxiliary cloud timestamp: {timestamp}, main cloud timestamp: {self.timestamp_last_frame}, dt_aux: {dt_aux:.3f} seconds")
+        print(f"Current velocity (x, y, yaw): {current_v_x:.2f} m/s, {current_v_y:.2f} m/s, {np.rad2deg(current_v_yaw):.2f} deg/s")
+        print(f"Additional shift for auxiliary cloud due to velocity: {additional_shift_x:.2f} m, {additional_shift_y:.2f} m, {np.rad2deg(additional_shift_yaw):.2f} deg")
+
+        shift_x += additional_shift_x
+        shift_y += additional_shift_y
+        yaw_in_radians += additional_shift_yaw
+
+        print(f"Total shift applied to auxiliary cloud: {shift_x:.2f} m, {shift_y:.2f} m, {np.rad2deg(yaw_in_radians):.2f} deg")
 
         rotated_points = self.rotate_points(processed_points, shift_x, shift_y, yaw_in_radians)
-        print(f"Point 0 after rotation: {rotated_points[0]}")
+        # print(f"Point 0 after rotation: {rotated_points[0]}")
 
         #[x, y, z, snr, v_comp_x, v_comp_y, time]
-        #processed_points = self.add_random_z(processed_points)
+        # processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
         if use_SNR:
             rotated_points = self.convert_snr_to_rcs(rotated_points, C_ars430=68.0) # Example constant, should be calibrated
@@ -75,12 +108,13 @@ class PointProcessor:
         return points
 
 
-    def calculate_compensated_velocity(self, points, shift_x, shift_y, shift_yaw):
+    def calculate_compensated_velocity(self, points, shift_x, shift_y, shift_yaw, timestamp_pc):
         """
         Calculates the absolute compensated radial velocity for radar points.
         
         Args:
             points: (N, 7) numpy array where columns are [x, y, z, intensity, RCS, max_v_r, v_r, v_r_comp, time]
+            timestamp_pc: Timestamp of the point cloud
         
         Returns:
             v_comp: (N,) numpy array of compensated velocities
@@ -92,7 +126,7 @@ class PointProcessor:
         v_meas = points[:, 6] # The raw Doppler velocity from the radar
         
 
-        v_x, v_y, omega_z = self.vel_x, self.vel_y, self.vel_yaw
+        v_x, v_y, omega_z = self.calculate_interpolated_velocity(timestamp_pc)
         t_x, t_y, yaw = shift_x, shift_y, shift_yaw  
         
         # radar sensor's physical velocity
@@ -120,17 +154,19 @@ class PointProcessor:
         # Compensate the raw measurement
         v_comp = v_meas + v_ego_los
 
-        # print("EGO VELOCITY (X, Y, YAW): ", v_x, v_y, omega_z)
-        # print("MEAN RADIAL VELOCITY BEFORE COMPENSATION: ", np.mean(v_meas))
-        # print("MEAN EGO LOS VELOCITY: ", np.mean(v_ego_los))
-        # print("MEAN RADIAL VELOCITY AFTER COMPENSATION: ", np.mean(v_comp))
+        print("EGO VELOCITY (X, Y, YAW): ", v_x, v_y, omega_z)
+        print("MEAN RADIAL VELOCITY BEFORE COMPENSATION: ", np.mean(v_meas))
+        print("MEAN EGO LOS VELOCITY: ", np.mean(v_ego_los))
+        print("MEAN RADIAL VELOCITY AFTER COMPENSATION: ", np.mean(v_comp))
         
         return v_comp
     
     def processPoints(self, points):
-        processed_points = self.processPointsSingleFrame(points, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
+        self.new_pc_arrived = False
 
-        #processed_points = self.add_random_z(processed_points)
+        processed_points = self.processPointsSingleFrame(points, self.timestamp_last_frame, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
+
+        # processed_points = self.add_random_z(processed_points)
         #processed_points = self.snr_to_fake_rcs(processed_points)
 
         processed_points = self.convert_intensity_to_rcs(processed_points)
@@ -175,8 +211,9 @@ class PointProcessor:
 
         return points
     
-    def processPointsSingleFrame(self, points, shift_x=0.0, shift_y=0.0, shift_yaw=0.0):
-        v_comp = self.calculate_compensated_velocity(points, shift_x, shift_y, shift_yaw)
+    def processPointsSingleFrame(self, points, timestamp_pc, shift_x=0.0, shift_y=0.0, shift_yaw=0.0):
+        points = points[(points[:, 0] != 0) & (points[:, 1] != 0)]  # Filter out points with x=0 (assuming these are invalid)
+        v_comp = self.calculate_compensated_velocity(points, shift_x, shift_y, shift_yaw, timestamp_pc)
 
         radial_ambiguous_velocity = np.expand_dims(points[:,6], axis=1)
         #print("Speed: ", np.shape(radial_ambiguous_velocity))
@@ -238,9 +275,20 @@ class PointProcessor:
 
         rcs = rcs_norm * (MAX_RCS - MIN_RCS) + MIN_RCS
 
+        #Overall RCS mean across frames: -5.23, Overall RCS std across frames: 15.30
+        rcs_mean = -5.23
+        rcs_std = 15.30
+
+        # filtered_rcs = rcs[rcs != 0]  # Filter 
+        # self.bins.append(np.histogram(filtered_rcs, range=(-60, 40), bins=1000)[0])
+
+        # #debug
         
-        rcs_mean = np.mean(rcs)
-        rcs_std = np.std(rcs)
+        # rcs_mean = np.mean(filtered_rcs)
+        # rcs_std = np.std(filtered_rcs)
+
+        # self.means.append(rcs_mean)
+        # self.stds.append(rcs_std)
 
         if ALIGN_RCS_DISTRIBUTION:
             
@@ -249,8 +297,54 @@ class PointProcessor:
 
             rcs = ((rcs - rcs_mean) / rcs_std) * VOD_RCS_STD + VOD_RCS_MEAN
 
-            print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
+            # print("RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
             # print("Sample RCS values: ", rcs[:10])
 
         points[:, 3] = rcs
         return points
+    
+    def print_bins(self):
+        if self.bins:
+            overall_histogram = np.sum(self.bins, axis=0)
+            print(f"Overall RCS histogram (sum of all frames): {overall_histogram}")
+        print(f"Overall RCS mean across frames: {np.mean(self.means):.2f}, Overall RCS std across frames: {np.mean(self.stds):.2f}")
+        print(f"Average std of RCS across frames: {np.mean(self.stds):.2f}")
+
+    def calculate_interpolated_velocity(self, timestamp_pc):
+        if self.timestamp_last_odom == 0:
+            return self.vel_x, self.vel_y, self.vel_yaw  # No previous velocity, return current as is
+
+        interpolated_vel_x = self.interpolate1d(self.timestamp_last_odom, self.timestamp_current_odom, timestamp_pc, self.previous_vel_x, self.vel_x)
+        interpolated_vel_y = self.interpolate1d(self.timestamp_last_odom, self.timestamp_current_odom, timestamp_pc, self.previous_vel_y, self.vel_y)
+        interpolated_vel_yaw = self.interpolate1d(self.timestamp_last_odom, self.timestamp_current_odom, timestamp_pc, self.previous_vel_yaw, self.vel_yaw)
+
+        return interpolated_vel_x, interpolated_vel_y, interpolated_vel_yaw
+        
+    def interpolate1d(self, x0, x1, xt, y0, y1):
+        if x1 - x0 == 0:
+            return y0  # Avoid division by zero, return y0 as fallback
+        return y0 + (y1 - y0) * ((xt - x0) / (x1 - x0))
+    
+    def add_odometry(self, vel_x, vel_y, vel_yaw, timestamp):
+        if self.timestamp_last_odom == 0: #First odometry message fill both previous and current
+            self.previous_vel_x = vel_x
+            self.previous_vel_y = vel_y
+            self.previous_vel_yaw = vel_yaw
+            self.timestamp_last_odom = timestamp
+        else:
+            self.previous_vel_x = self.vel_x
+            self.previous_vel_y = self.vel_y
+            self.previous_vel_yaw = self.vel_yaw
+            self.timestamp_last_odom = self.timestamp_current_odom
+
+        self.vel_x = vel_x
+        self.vel_y = vel_y
+        self.vel_yaw = vel_yaw
+
+        self.timestamp_current_odom = timestamp
+
+    def filterout_fixed_points(self, points, fixed_threshold=0.2):
+        # Assuming points is a numpy array of shape (N, 7) where the velocity component is at index 5
+        v_comp = points[:, 5]
+        mask = np.abs(v_comp) > fixed_threshold
+        return points[mask]

@@ -28,7 +28,7 @@ LOG = "4PORTE"
 #DATASET = "NUSCENES"  
 DATASET = "VOD"  
 
-
+N_FRAMES = 1
 
 
 # # Marzaglia
@@ -72,7 +72,10 @@ IMG_PATH_BEV = "/seeing_beyond/tools/results/BEV/images"
 
 if DATASET == "VOD":
     CFG_FILE = "/seeing_beyond/tools/cfgs/kitti_models/cfar-radar.yaml"
-    CKPT_FILE = "/seeing_beyond/ckpts/cfar/cfar-radar.pth" 
+    if N_FRAMES == 1:
+        CKPT_FILE = "/seeing_beyond/ckpts/cfar/cfar-radar.pth" 
+    else:
+        CKPT_FILE = "/seeing_beyond/output/cfar-radar-5frames/debug_new/ckpt/checkpoint_epoch_36.pth"
 
 # NuScenes
 if DATASET == "NUSCENES":
@@ -103,7 +106,7 @@ class DataProcessor:
                 radar_offset_tx=RADAR_OFFSET_TX,
                 radar_offset_ty=RADAR_OFFSET_TY,
                 radar_offset_yaw=RADAR_OFFSET_YAW,
-                n_frames=1
+                n_frames=N_FRAMES
             )
         if DATASET == "NUSCENES":
             self.points_processor = PointProcessorNuscenes(
@@ -175,36 +178,41 @@ class DataProcessor:
             raise TypeError("Unsupported image type: ", proto_msg.type)
         
     def decodeOdometry(self, proto_msg):
-        self.points_processor.vel_x = proto_msg.twist.linear.x
-        self.points_processor.vel_y = proto_msg.twist.linear.y
-         
-        self.points_processor.vel_yaw = proto_msg.twist.angular.z
+        self.points_processor.add_odometry(proto_msg.twist.linear.x, proto_msg.twist.linear.y, proto_msg.twist.angular.z, proto_msg.head.stamp)
 
     def decodeCloud(self, data):
         if data.head.frameId == radar_frame_id:
             self.points = protoCloudToNumpy(data)
             print("Pointcloud: ", np.shape(self.points))
+            self.points_processor.new_pc_arrived = True
        
             self.points_processor.add_timestamp(data.head.stamp)
 
         elif data.head.frameId == "radar_fl":
             self.left_points = protoCloudToNumpy(data)
+            self.points_processor.timestamp_last_frame_left = data.head.stamp
 
         elif data.head.frameId == "radar_fr":
             self.right_points = protoCloudToNumpy(data)
+            self.points_processor.timestamp_last_frame_right = data.head.stamp
 
 
     def processCloud(self):
         points_multiframe = self.points_processor.processPoints(self.points)
         
         if self.left_points is not None:
-            self.points_processor.add_auxiliar_cloud(self.left_points, 0.0, 0.5, 32.5)
+            print("Adding left radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_left-self.points_processor.timestamp_last_frame)*1e-9)
+            self.points_processor.add_auxiliar_cloud(self.left_points, self.points_processor.timestamp_last_frame_left, 0.0, 0.5, 32.5)
         if self.right_points is not None:
-            self.points_processor.add_auxiliar_cloud(self.right_points, 0.0, -0.5, -32.0)
+            print("Adding right radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_right-self.points_processor.timestamp_last_frame)*1e-9)
+            self.points_processor.add_auxiliar_cloud(self.right_points, self.points_processor.timestamp_last_frame_right, 0.0, -0.5, -32.0)
 
         points_multiframe = self.points_processor.multiframe_points
 
         points_multiframe = points_multiframe.astype(np.float32)
+
+
+        print(f"Points with rcs 0: {points_multiframe[points_multiframe[:,1] == 0]}")
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
         
@@ -248,7 +256,7 @@ class DataProcessor:
             # Applied the .get() fallback to prevent KeyErrors for missing classes
             color_dict[v] = label_color_palette_2d.get(v, (128, 128, 128))
 
-        print(color_dict)
+        # print(color_dict)
         saveODImgs(anno=predictions, pts=points_multiframe, img_path=IMG_PATH_BEV, color_dict=color_dict, title='pred', fid=self.counter)
         self.counter += 1
         # -------------------------------------------
@@ -282,7 +290,7 @@ class DataProcessor:
 
     def visualize(self, points, predictions):
         
-        # 4. Generate the image!
+        # Generate the image
         self.vis.draw_plot(
             img=self.points_processor.img,
             points=points,
@@ -311,19 +319,20 @@ if __name__ == "__main__":
             elif(schema.name == "proto.tk.msg.Cloud"):
                 #print(f"msg {proto_msg}]")
                 if processor.points_processor.img is not None:
-                    if channel.topic == "/radar/cloud/radar_fc" and i > 400:
+                    if channel.topic == "/radar/cloud/radar_fc" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         #print(f"msg {proto_msg}]")
                         processor.decodeCloud(proto_msg)
-                        processor.processCloud()
                         counter_cloud += 1
-                        print(f"******* FRAME {counter_cloud} *******")
+                        # if counter_cloud % 2000 == 0:
+                        #     processor.points_processor.print_bins()
+                        #     sys.exit(0)
                         if counter_cloud % 50 == 0:
                             print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
-                    elif channel.topic == "/radar/cloud/radar_fr" and i > 400:
+                    elif channel.topic == "/radar/cloud/radar_fr" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
-                    elif channel.topic == "/radar/cloud/radar_fl" and i > 400:
+                    elif channel.topic == "/radar/cloud/radar_fl" and i > 650:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
                     else: 
@@ -344,3 +353,6 @@ if __name__ == "__main__":
                 #print(f"msg {proto_msg}]")
                 processor.decodeOdometry(proto_msg)
                 counter_odom += 1
+
+                if processor.points_processor.new_pc_arrived:
+                    processor.processCloud()
