@@ -75,6 +75,7 @@ class PointProcessorNuscenes(BasePointProcessor):
     
     def alignRCSDistribution(self, rcs):
         rcs = ((rcs - RCS_MEAN) / RCS_STD) * NUSCENE_RCS_STD + NUSCENE_RCS_MEAN
+        print("Aligned RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
         return rcs
 
     

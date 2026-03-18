@@ -284,6 +284,6 @@ if __name__ == "__main__":
                 #print(f"msg {proto_msg}]")
                 processor.decodeOdometry(proto_msg)
                 counter_odom += 1
-
+                print(f"Frame {i}, total odometry messages: {counter_odom}, total radar frames: {counter_cloud}")
                 if processor.points_processor.new_pc_arrived:
                     processor.processCloud()

@@ -42,6 +42,7 @@ def drawBEV(ax, pts, annos, color_dict, ax_title, ext_legends=[]):
             l = rec[3]
             w = rec[4]
             ang = rec[6]
+            ang = ang * 180 / np.pi  # Convert to degrees for matplotlib
             
             label = pred_labels[i]
 
