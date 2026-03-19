@@ -28,7 +28,7 @@ LOG = "4PORTE"
 #DATASET = "NUSCENES"  
 DATASET = "VOD"  
 
-N_FRAMES = 1
+N_FRAMES = 5
 
 
 # # Marzaglia
@@ -71,11 +71,13 @@ IMG_PATH_BEV = "/seeing_beyond/tools/results/BEV/images"
 # YAML_PATH="/media/franco/hdd/dataset/radar_data/calib_4porte.yaml"
 
 if DATASET == "VOD":
-    CFG_FILE = "/seeing_beyond/tools/cfgs/kitti_models/cfar-radar.yaml"
+    
     if N_FRAMES == 1:
         CKPT_FILE = "/seeing_beyond/ckpts/cfar/cfar-radar.pth" 
+        CFG_FILE = "/seeing_beyond/tools/cfgs/kitti_models/cfar-radar.yaml"
     else:
-        CKPT_FILE = "/seeing_beyond/output/cfar-radar-5frames/debug_new/ckpt/checkpoint_epoch_36.pth"
+        CKPT_FILE = "/seeing_beyond/output/cfar-radar-5frames/debug_new/ckpt/checkpoint_epoch_40.pth"
+        CFG_FILE = "/seeing_beyond/tools/cfgs/kitti_models/cfar-radar-5frames.yaml"
 
 # NuScenes
 if DATASET == "NUSCENES":
