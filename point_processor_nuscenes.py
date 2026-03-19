@@ -1,8 +1,8 @@
 import numpy as np
 from base_point_processor import BasePointProcessor, RCS_MEAN, RCS_STD, use_SNR
-
-NUSCENE_RCS_MEAN = 6.90
-NUSCENE_RCS_STD = 7.60
+#Mean RCS: 8.70, Std RCS: 7.04
+NUSCENE_RCS_MEAN = 8.70
+NUSCENE_RCS_STD = 7.04
 
 class PointProcessorNuscenes(BasePointProcessor):
     def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):

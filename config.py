@@ -9,8 +9,8 @@ NET = "PP"
 LOG = "4PORTE"
 #LOG = "MARZAGLIA"
 
-#DATASET = "NUSCENES"  
-DATASET = "VOD"  
+DATASET = "NUSCENES"  
+#DATASET = "VOD"  
 
 N_FRAMES = 5
 
@@ -71,6 +71,7 @@ if NET == "PP":
         CFG_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/tools/cfgs/nuscenes_models/PP_nuscenes_radar.yaml"
         #CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_40.pth" 
         #CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar_old/default/ckpt/checkpoint_epoch_40.pth"
+        #CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_100.pth"
         CKPT_FILE = "/media/franco/hdd/matteogombia/OpenPCDet/output/nuscenes_models/PP_nuscenes_radar/default/ckpt/checkpoint_epoch_100.pth"
 
 elif NET == "MM-FA":
