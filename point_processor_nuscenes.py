@@ -78,4 +78,5 @@ class PointProcessorNuscenes(BasePointProcessor):
         print("Aligned RCS stats - mean: {:.2f}, std: {:.2f}".format(np.mean(rcs), np.std(rcs)))
         return rcs
 
-    
+    def updateTimestamp(self, timestamp):
+        return timestamp + self.dt

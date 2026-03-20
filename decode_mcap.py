@@ -144,6 +144,7 @@ class DataProcessor:
             self.points_processor.add_auxiliar_cloud(self.right_points, self.points_processor.timestamp_last_frame_right, 0.0, -0.5, -32.0)
 
         points_multiframe = self.points_processor.multiframe_points
+        points_multiframe = points_multiframe.astype(np.float32)
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
         

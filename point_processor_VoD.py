@@ -38,6 +38,8 @@ class PointProcessorVod(BasePointProcessor):
 
         time_vector = np.zeros((points.shape[0], 1), dtype=points.dtype)
         processed_points = np.hstack([points[:, 0:3], snr, radial_ambiguous_velocity, v_comp, time_vector])
+
+        processed_points = self.filterout_fixed_points(processed_points)
         
         # print("Points with batch: ", np.shape(processed_points))
 
@@ -46,3 +48,12 @@ class PointProcessorVod(BasePointProcessor):
     def alignRCSDistribution(self, rcs):
         rcs = ((rcs - RCS_MEAN) / RCS_STD) * VOD_RCS_STD + VOD_RCS_MEAN
         return rcs
+    
+    def filterout_fixed_points(self, points, fixed_threshold=0.6):
+        # Assuming points is a numpy array of shape (N, 7) where the velocity component is at index 5
+        v_comp = points[:, 5]
+        mask = np.abs(v_comp) > fixed_threshold
+        return points[mask]
+
+    def updateTimestamp(self, timestamp):
+        return timestamp - 1

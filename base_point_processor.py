@@ -116,7 +116,7 @@ class BasePointProcessor:
         self.points_per_frame.append(len(processed_points))
 
         self.multiframe_points = self.transposeFrame(self.multiframe_points)
-        self.multiframe_points[:, 6] -= 1  # Decrease time for all points by 1
+        self.multiframe_points[:, 6] = updateTimestamp(self.multiframe_points[:, 6])  
         self.multiframe_points = np.vstack([self.multiframe_points, processed_points])
 
 
@@ -318,5 +318,10 @@ class BasePointProcessor:
 
     @abstractmethod
     def alignRCSDistribution(self, rcs):
+        """Must be implemented by child classes (VoD vs NuScenes)"""
+        pass
+
+    @abstractmethod
+    def updateTimestamp(self, timestamp):
         """Must be implemented by child classes (VoD vs NuScenes)"""
         pass
