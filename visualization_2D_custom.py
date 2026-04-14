@@ -83,12 +83,12 @@ class Visualization2D:
         # Because your data is [x, y, z, rcs, velocity, v_comp], we just grab columns 0,1,2
         pts_img, pts_depth = self.calib.lidar_to_img(pts[:, :3])
 
-        print(f"--- PROJECTION DEBUG ---")
-        print(f"Image Resolution: {W}x{H}")
-        print(f"Min/Max Depth: {np.min(pts_depth):.2f}m to {np.max(pts_depth):.2f}m")
-        print(f"U (X-Pixels): {np.min(pts_img[:, 0]):.1f} to {np.max(pts_img[:, 0]):.1f}")
-        print(f"V (Y-Pixels): {np.min(pts_img[:, 1]):.1f} to {np.max(pts_img[:, 1]):.1f}")
-        print(f"------------------------")
+        # print(f"--- PROJECTION DEBUG ---")
+        # print(f"Image Resolution: {W}x{H}")
+        # print(f"Min/Max Depth: {np.min(pts_depth):.2f}m to {np.max(pts_depth):.2f}m")
+        # print(f"U (X-Pixels): {np.min(pts_img[:, 0]):.1f} to {np.max(pts_img[:, 0]):.1f}")
+        # print(f"V (Y-Pixels): {np.min(pts_img[:, 1]):.1f} to {np.max(pts_img[:, 1]):.1f}")
+        # print(f"------------------------")
 
         mask = (pts_depth > min_distance_threshold) & (pts_depth < max_distance_threshold) & \
                (pts_img[:, 0] >= 0) & (pts_img[:, 0] < W) & \
@@ -96,7 +96,7 @@ class Visualization2D:
 
         valid_pts_img = pts_img[mask]
         valid_pts_depth = pts_depth[mask]
-        print("Valid radar points after filtering: ", valid_pts_img.shape[0])
+        # print("Valid radar points after filtering: ", valid_pts_img.shape[0])
         ax.scatter(valid_pts_img[:, 0], valid_pts_img[:, 1], 
                    c=valid_pts_depth, cmap='jet', s=3, alpha=0.9, zorder=10)
 

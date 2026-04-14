@@ -13,10 +13,21 @@ import torch
 from visualization_2D_custom import Visualization2D
 from CustomCalib import CustomYAMLCalibration
 from vis_tools import saveODImgs
-from vod.visualization.settings import label_color_palette_2d
 from config import *
 
+from dataset_builder import write_in_pcd, write_labels
+
 import cv2
+
+label_color_palette_2d = {'Cyclist': (1.0, 0.0, 0.0),
+                       'Pedestrian': (0.0, 1.0, 0.0),
+                       'Car': (0.0, 0.0, 1.0),
+                       'car': (0.0, 0.0, 1.0),
+                       'car_moving': (0.0, 0.0, 1.0),
+                       'car_stopped': (0.0, 0.0, 0.0),
+                       'pedestrian': (0.0, 1.0, 0.0),
+                       'bicycle': (1.0, 0.0, 0.0)
+                       }
 
 
 class CustomDataset(DatasetTemplate):
@@ -44,12 +55,13 @@ class DataProcessor:
                 radar_offset_yaw=RADAR_OFFSET_YAW,
                 n_frames=N_FRAMES
             )
-        if DATASET == "NUSCENES":
+        if DATASET == "NUSCENES" or DATASET == "TRUCKSCENES":
             self.points_processor = PointProcessorNuscenes(
                 radar_offset_tx=RADAR_OFFSET_TX,
                 radar_offset_ty=RADAR_OFFSET_TY,
                 radar_offset_yaw=RADAR_OFFSET_YAW,
-                n_frames=6
+                n_frames=N_FRAMES,
+                is_rcs_normalized=IS_RCS_NORMALIZED
             )
 
         calib = CustomYAMLCalibration(
@@ -120,6 +132,8 @@ class DataProcessor:
         if data.head.frameId == radar_frame_id:
             self.points = protoCloudToNumpy(data)
             print("Pointcloud: ", np.shape(self.points))
+            print("**********MAX, MIN, MEAN Z : ", np.max(self.points[:,2]), np.min(self.points[:,2]), np.mean(self.points[:,2]))
+
             self.points_processor.new_pc_arrived = True
        
             self.points_processor.add_timestamp(data.head.stamp)
@@ -134,22 +148,38 @@ class DataProcessor:
 
 
     def processCloud(self):
+        print(f"***********PROCESSING FRAME {self.counter} **********************")
         points_multiframe = self.points_processor.processPoints(self.points)
         
         if self.left_points is not None:
             print("Adding left radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_left-self.points_processor.timestamp_last_frame)*1e-9)
-            self.points_processor.add_auxiliar_cloud(self.left_points, self.points_processor.timestamp_last_frame_left, 0.0, 0.5, 32.5)
+            self.points_processor.add_auxiliar_cloud(self.left_points, self.points_processor.timestamp_last_frame_left, RADAR_LX_OFFSET_X, RADAR_LX_OFFSET_Y, RADAR_LX_OFFSET_ANGLE_DEG)
         if self.right_points is not None:
             print("Adding right radar points to multiframe processor, timestamp diff: ", (self.points_processor.timestamp_last_frame_right-self.points_processor.timestamp_last_frame)*1e-9)
-            self.points_processor.add_auxiliar_cloud(self.right_points, self.points_processor.timestamp_last_frame_right, 0.0, -0.5, -32.0)
+            self.points_processor.add_auxiliar_cloud(self.right_points, self.points_processor.timestamp_last_frame_right, RADAR_RX_OFFSET_X, RADAR_RX_OFFSET_Y, RADAR_RX_OFFSET_ANGLE_DEG)
 
         points_multiframe = self.points_processor.multiframe_points
         points_multiframe = points_multiframe.astype(np.float32)
+
+        # if self.counter == 15:
+        #     print("Multiframe points shape: ", np.shape(points_multiframe))
+        #     print("Multiframe points sample: ", points_multiframe)
+
+        # --- NEW DEBUG BLOCK ---
+        # print("\n--- NEURAL NETWORK INPUT CHECK ---")
+        # print(f"Total points entering network: {points_multiframe.shape}")
+        # print("First point features [X, Y, Z, Feature4, Feature5, Feature6, Feature7]:")
+        # print(points_multiframe[0, :]) # Print the very first point
+        
+        # # Check for catastrophic maximums across the entire frame
+        # print("Maximum values per column:")
+        # print(np.max(points_multiframe, axis=0))
+        # print("----------------------------------\n")
+        # -----------------------
         
         pred_dicts, recall_dicts = self.runInference(points_multiframe)
-        
-
         predictions = pred_dicts[0]
+
 
         # Move results back to CPU and convert to NumPy
         pred_boxes = predictions['pred_boxes'].cpu().numpy()
@@ -179,21 +209,21 @@ class DataProcessor:
         
         color_dict = {}
         for i, v in enumerate(cfg.CLASS_NAMES):
-            if v == 'bicycle':
-                v = 'Cyclist' 
-            if v == 'pedestrian':
-                v = 'Pedestrian'
-            if v == 'car':
-                v = 'Car'
             # Applied the .get() fallback to prevent KeyErrors for missing classes
             color_dict[v] = label_color_palette_2d.get(v, (128, 128, 128))
 
         # print(color_dict)
-        saveODImgs(anno=predictions, pts=points_multiframe, img_path=IMG_PATH_BEV, color_dict=color_dict, title='pred', fid=self.counter)
-        self.counter += 1
+        saveODImgs(anno=predictions, pts=points_multiframe, img_path=IMG_PATH_BEV, color_dict=color_dict, cls_names=cfg.CLASS_NAMES, title='pred', fid=self.counter)
+        
+        
         # -------------------------------------------
 
-        self.visualize(points_multiframe, predictions)
+
+        #DATASET 
+        write_in_pcd(points_multiframe, self.counter)
+        write_labels(predictions, class_names, self.counter)
+        #self.visualize(points_multiframe, predictions)
+        self.counter += 1
 
     
     def runInference(self, points_with_time):
@@ -249,22 +279,23 @@ if __name__ == "__main__":
                 processor.decodeImage(channel, proto_msg)
 
             elif(schema.name == "proto.tk.msg.Cloud"):
-                #print(f"msg {proto_msg}]")
+                #print(f"msg {channel.topic}]")
+                STARTING_FRAME = 0
                 if processor.points_processor.img is not None:
-                    if channel.topic == "/radar/cloud/radar_fc" and i > 650:
+                    if (channel.topic == "/radar/cloud/radar_fc" or channel.topic == "/sens/radar_fc/cloud") and i > STARTING_FRAME:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         #print(f"msg {proto_msg}]")
                         processor.decodeCloud(proto_msg)
                         counter_cloud += 1
-                        # if counter_cloud % 2000 == 0:
+                        # if counter_cloud % 10000 == 0:
                         #     processor.points_processor.print_bins()
                         #     sys.exit(0)
                         if counter_cloud % 50 == 0:
                             print(f"Processed {counter_cloud} radar frames, total odometry messages: {counter_odom}")
-                    elif channel.topic == "/radar/cloud/radar_fr" and i > 650:
+                    elif (channel.topic == "/radar/cloud/radar_fr" or channel.topic == "/sens/radar_fr/cloud") and i > STARTING_FRAME:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
-                    elif channel.topic == "/radar/cloud/radar_fl" and i > 650:
+                    elif (channel.topic == "/radar/cloud/radar_fl" or channel.topic == "/sens/radar_fl/cloud") and i > STARTING_FRAME:
                         #print(f"msg {channel.topic} {schema.name} [{message.log_time}]")
                         processor.decodeCloud(proto_msg)
                     else: 
@@ -281,10 +312,10 @@ if __name__ == "__main__":
                 #     processor.processCloud()
             # elif(schema.name == "proto.tk.msg.Odometry"):
             #     processor.decodeOdometry(proto_msg)
-            elif (channel.topic == "/odom/debug"):
+            elif (channel.topic == "/odom/debug" or channel.topic == "/sens/vehicle/odometry"):
                 #print(f"msg {proto_msg}]")
                 processor.decodeOdometry(proto_msg)
                 counter_odom += 1
-                print(f"Frame {i}, total odometry messages: {counter_odom}, total radar frames: {counter_cloud}")
+                #print(f"Frame {i}, total odometry messages: {counter_odom}, total radar frames: {counter_cloud}")
                 if processor.points_processor.new_pc_arrived:
-                    processor.processCloud()
+                   processor.processCloud()

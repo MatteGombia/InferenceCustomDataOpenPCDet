@@ -39,7 +39,8 @@ class PointProcessorVod(BasePointProcessor):
         time_vector = np.zeros((points.shape[0], 1), dtype=points.dtype)
         processed_points = np.hstack([points[:, 0:3], snr, radial_ambiguous_velocity, v_comp, time_vector])
 
-        processed_points = self.filterout_fixed_points(processed_points)
+        #processed_points = self.filterout_fixed_points(processed_points)
+        processed_points = self.filter_invalid_points(processed_points)
         
         # print("Points with batch: ", np.shape(processed_points))
 
@@ -57,3 +58,9 @@ class PointProcessorVod(BasePointProcessor):
 
     def updateTimestamp(self, timestamp):
         return timestamp - 1
+
+    def filter_valid_speed_points(self, points):
+        # Filter out points with unrealistic speeds (e.g., > 30 m/s)
+        speed = np.abs(points[:, -2])
+        valid_speed_points = points[speed < 30]
+        return valid_speed_points

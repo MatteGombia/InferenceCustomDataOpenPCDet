@@ -1,12 +1,15 @@
 import numpy as np
 from base_point_processor import BasePointProcessor, RCS_MEAN, RCS_STD, use_SNR
 #Mean RCS: 8.70, Std RCS: 7.04
+
+# New logs: Overall RCS mean across frames: -6.38, Overall RCS std across frames: 8.14
 NUSCENE_RCS_MEAN = 8.70
 NUSCENE_RCS_STD = 7.04
 
 class PointProcessorNuscenes(BasePointProcessor):
-    def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames):
+    def __init__(self, radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames, is_rcs_normalized=False):
         super().__init__(radar_offset_tx, radar_offset_ty, radar_offset_yaw, n_frames)
+        self.is_rcs_normalized = is_rcs_normalized
 
     
 
@@ -60,13 +63,26 @@ class PointProcessorNuscenes(BasePointProcessor):
         #v_comp=np.expand_dims(v_comp, axis=1)
         if use_SNR:
             snr = np.expand_dims(points[:,4], axis=1)
-        else: #Intensity
-            snr = self.convert_intensity_to_rcs(points[:,3])
+        else: #RCS
+            snr = points[:,3]
+            if self.is_rcs_normalized:
+                snr = self.convert_intensity_to_rcs(snr)
+                
+            # ####
+            # self.bins.append(np.histogram(snr, range=(-30, 70), bins=100)[0])
+            # rcs_mean = np.mean(snr)
+            # rcs_std = np.std(snr)
+
+            # self.means.append(rcs_mean)
+            # self.stds.append(rcs_std)
+            # ###
+
             snr = np.expand_dims(snr, axis=1)
 
         time_vector = np.zeros((points.shape[0], 1), dtype=points.dtype)
         processed_points = np.hstack([points[:, 0:3], snr, v_comp, time_vector])
         
+        processed_points = self.filter_invalid_points(processed_points)
         # [x, y, z, snr, v_comp_x, v_comp_y, time]
         
         print("Processed points shape: ", np.shape(processed_points))
@@ -80,3 +96,15 @@ class PointProcessorNuscenes(BasePointProcessor):
 
     def updateTimestamp(self, timestamp):
         return timestamp + self.dt
+
+    def filter_valid_speed_points(self, points):
+        # Filter out points with unrealistic speeds (e.g., > 30 m/s)
+        speed = np.sqrt(points[:, -2]**2 + points[:, -3]**2)  
+        valid_speed_points = points[speed < 60]
+        return valid_speed_points
+
+    def compensate_points_motion(self, points, dt):
+        points[:, 0] = points[:, 0] + points[:, 4] * dt
+        points[:, 1] = points[:, 1] + points[:, 5] * dt
+
+        return points

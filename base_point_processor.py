@@ -2,7 +2,8 @@ import numpy as np
 from abc import abstractmethod
 
 use_SNR = False
-ALIGN_RCS_DISTRIBUTION = True
+ALIGN_RCS_DISTRIBUTION = False
+COMP_POINTS_MOTION = True
 
 RCS_MEAN = -5.23
 RCS_STD = 15.30
@@ -105,8 +106,6 @@ class BasePointProcessor:
     
     def processPoints(self, points):
         self.new_pc_arrived = False
-        points = points[(points[:, 0] != 0) & (points[:, 1] != 0)]  # Filter out points with x=0 (assuming these are invalid)
-
         processed_points = self.processPointsSingleFrame(points, self.timestamp_last_frame, self.radar_offset_tx, self.radar_offset_ty, self.radar_offset_yaw)
 
         if len(self.points_per_frame) >= self.n_frames:
@@ -116,7 +115,11 @@ class BasePointProcessor:
         self.points_per_frame.append(len(processed_points))
 
         self.multiframe_points = self.transposeFrame(self.multiframe_points)
-        self.multiframe_points[:, 6] = updateTimestamp(self.multiframe_points[:, 6])  
+        self.multiframe_points[:, 6] = self.updateTimestamp(self.multiframe_points[:, 6])  
+
+        if COMP_POINTS_MOTION:
+            self.multiframe_points = self.compensate_points_motion(self.multiframe_points, self.dt)
+
         self.multiframe_points = np.vstack([self.multiframe_points, processed_points])
 
 
@@ -212,6 +215,14 @@ class BasePointProcessor:
             # print("Sample RCS values: ", rcs[:10])
 
         return rcs
+
+    def filter_invalid_points(self, points):
+        #valid_points = points[(np.abs(points[:, 0]) > 1.0) & (np.abs(points[:, 0]) < 51.2) & (np.abs(points[:, 1]) > 1.0) & (np.abs(points[:, 1]) < 25.6)]  # Filter out points with x=0 (assuming these are invalid)
+        valid_points = points[(np.abs(points[:, 0]) > 1.0) & (np.abs(points[:, 1]) > 1.0)]
+
+        valid_points = self.filter_valid_speed_points(valid_points)
+
+        return valid_points
     
     def print_bins(self):
         if self.bins:
@@ -324,4 +335,13 @@ class BasePointProcessor:
     @abstractmethod
     def updateTimestamp(self, timestamp):
         """Must be implemented by child classes (VoD vs NuScenes)"""
+        pass
+
+    @abstractmethod
+    def filter_valid_speed_points(self, points):
+        """Must be implemented by child classes (VoD vs NuScenes)"""
+        pass
+
+    @abstractmethod 
+    def compensate_points_motion(self, points, dt):
         pass
